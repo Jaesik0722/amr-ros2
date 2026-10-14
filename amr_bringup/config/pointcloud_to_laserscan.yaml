@@ -1,0 +1,16 @@
+pointcloud_to_laserscan:
+  ros__parameters:
+    target_frame: base_link
+    transform_tolerance: 0.05
+    # Slice relative to base_link (wheel axle, 0.1 m above the floor). The floor must
+    # stay out of it even when the robot pitches while accelerating (odom->base is
+    # planar): 0.2 m above the floor tolerates ~1 deg of pitch at range_max.
+    min_height: 0.10
+    max_height: 1.0
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.0087  # 0.5 deg
+    scan_time: 0.1
+    range_min: 0.35  # drop self-hits: antennas, handles, hitch
+    range_max: 12.0
+    use_inf: true

@@ -1,0 +1,27 @@
+amr_base:
+  ros__parameters:
+    port: /dev/ttyWheel
+    baudrate: 19200
+    configure_driver_on_start: true
+    update_rate: 20.0          # 19200 baud limits a full cmd/reply cycle to ~50 Hz.
+    reply_timeout: 0.04
+    cmd_vel_timeout: 0.5       # Stop if no cmd_vel for this long.
+    use_stamped_cmd_vel: false # Match Nav2 'enable_stamped_cmd_vel'.
+    max_linear_velocity: 0.5
+    max_angular_velocity: 1.5
+    # Tyre radius and track from the CAD (Product1_V0.2.stp); the old driver
+    # library used 0.1 / 0.3752. Calibrate on the real robot.
+    wheel_radius: 0.1
+    wheel_separation: 0.3742
+    # MD Robot MDH300 in-wheel motor (24 V, 180 W, rated 11 Nm / 160 rpm at the wheel):
+    # 20 poles, 1280 ppr at the motor = 5542 ppr at the wheel (gear 4.33).
+    gear_ratio: 4.33
+    number_of_poles: 20
+    encoder_ppr: 1280
+    left_sign: -1
+    right_sign: 1
+    odom_frame: odom
+    base_frame: base_footprint
+    publish_tf: true
+    left_wheel_joint: left_wheel_joint
+    right_wheel_joint: right_wheel_joint

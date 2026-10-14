@@ -1,0 +1,69 @@
+# Mapping from the CAD assembly (Product1_V0.2.stp) to URDF links, and mass
+# assumptions. Used by step_to_urdf.py. Units: mm and kg.
+#
+# CAD frame: +x forward, +y left, +z up. Wheel axle centre at (0, 0, 36),
+# ground at z = -64 (tyre radius 100 mm).
+
+# Link frame origins in CAD coordinates (zero joint positions).
+frames:
+  base_link: [0.0, 0.0, 36.0]
+  left_wheel_link: [0.0, 187.1, 36.0]     # tyre torus centre
+  right_wheel_link: [0.0, -187.1, 36.0]
+  hitch_yaw_link: [-176.8, 0.0, 30.8]     # yaw servo axis (z), at pitch axis height
+  hitch_pitch_link: [-219.0, 0.0, 30.8]   # pitch servo axis (y)
+
+# Leaf parts are matched against their instance path; first matching rule wins.
+# Anything unmatched belongs to base_link.
+links:
+  left_wheel_link: ['[MDH300]_1.2|']
+  right_wheel_link: ['[MDH300]_1.1|']
+  hitch_pitch_link: ['Part160.', 'Part161.']
+  hitch_yaw_link: ['Part287.', 'Part288.', 'Part289.', 'Part162.', 'DUMMY_DC13_IDLE.2|',
+                   'H42-IDLER.2|', 'Part173.']
+
+# Mass assignment. 'mass' gives a group total (distributed by volume),
+# 'density' is in g/cm^3. First matching rule wins.
+# ASSUMED values must be replaced by measurements (see README).
+mass_rules:
+  # MD Robot MDH300 datasheet: 3.8 kg per unit. The whole unit is put on the wheel link
+  # (the fixed stator share is unknown).
+  - {match: '[MDH300]_1.1|', mass: 3.8, note: MDH300 datasheet}
+  - {match: '[MDH300]_1.2|', mass: 3.8, note: MDH300 datasheet}
+  - {match: 'DUMMY_DC13_IDLE.1|', mass: 0.165, note: XM540-W270 datasheet}
+  - {match: 'DUMMY_DC13_IDLE.2|', mass: 0.165, note: XM540-W270 datasheet}
+  - {match: 'MID-360_4_ASM', mass: 0.265, note: Livox Mid-360 datasheet}
+  - {match: 'D435_RELEASE_ASM_ASM.1|', mass: 0.072, note: D435 datasheet}
+  - {match: 'D435_RELEASE_ASM_ASM.2|', mass: 0.072, note: D435 datasheet}
+  - {match: 'TA_PERIPHERIAL_T265', mass: 0.055, note: T265 datasheet}
+  - {match: 'NUC_BE_MB Assembly', mass: 0.35, note: ASSUMED NUC board + cooler}
+  - {match: 'Coral USB Accelerator', mass: 0.02, note: datasheet}
+  - {match: '4010_DC-Fan.1|', mass: 0.015, note: ASSUMED}
+  - {match: '4010_DC-Fan.2|', mass: 0.015, note: ASSUMED}
+  - {match: 'BT_Antenna_Assem.1|', mass: 0.02, note: ASSUMED}
+  - {match: 'BT_Antenna_Assem.2|', mass: 0.02, note: ASSUMED}
+  - {match: 'Part12.1|', density: 2.2, note: ASSUMED battery block}
+  - {match: 'FusionComponent.1|', density: 1.5, note: ASSUMED unknown block}
+  - {match: 'Product9.2|Product9.1 / Part1.1|', density: 1.8, note: ASSUMED wireless charging RX coil}
+  - {match: 'Product5.', density: 1.5, note: ASSUMED casters}
+  - {match: 'Flange Nut', density: 7.85, note: steel}
+  - {match: 'Washer', density: 7.85, note: steel}
+  - {match: '', density: 2.7, note: ASSUMED aluminium for all remaining structure}
+
+# Scale every mass so the robot total equals this value (kg). null = no scaling.
+# Set this to the weighed robot mass.
+measured_total_mass: null
+
+# Visual mesh tessellation for step_dump.py: tolerances are [linear mm, angular rad].
+# Own designed parts use 'default'. Purchased parts (first matching group, instance
+# path substrings) use coarser values. For vendor electronics, parts and solids whose
+# bounding box diagonal is below min_size_mm (SMD parts, connectors, pins, hidden
+# inside the housings) are left out of the visual mesh; mass properties keep them.
+tessellation:
+  default: [0.1, 0.2]
+  groups:
+    - match: ['[MDH300]', 'MID-360', 'DUMMY_DC13_IDLE', 'H42-IDLER', 'Product5.',
+              'BT_Antenna', '4010_DC-Fan', 'CUI-PJ', 'Flange Nut', 'Washer']
+      tol: [0.2, 0.35]
+    - match: ['NUC_BE_MB', 'D435_RELEASE', 'TA_PERIPHERIAL_T265', 'Coral USB']
+      tol: [0.3, 0.5]
+      min_size_mm: 30.0
