@@ -70,7 +70,7 @@ README에 없는 배경, 결정 사항, 함정만 다룬다.
 ## 빌드와 테스트
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install && colcon test && colcon test-result --all   # 테스트 19개
+colcon build --symlink-install && colcon test && colcon test-result --all   # 테스트 36개
 ament_flake8 amr_isaac amr_description/tools                               # colcon 밖의 코드도 린트
 ```
 CI(.github/workflows/ci.yml)는 ros:jazzy 컨테이너에서 rosdep, build, test를 돌린다.
@@ -106,13 +106,62 @@ CI(.github/workflows/ci.yml)는 ros:jazzy 컨테이너에서 rosdep, build, test
 12. 프로세스를 정리할 때 `pkill -f <패턴>`을 쓰면 그 패턴이 들어간 자기 셸도 죽는다.
     PID를 골라서 죽이거나 `pgrep -f "^/절대경로/python"`처럼 앵커를 건다.
 13. 헤드리스 종료 시 segfault는 무해하다. self-test는 `os._exit`로 끝난다.
+14. **실행 중에 만든 PhysX joint는 반영되지 않는다.** 아티큘레이션 두 개 사이 joint면 더 그렇다.
+    카트 래치 joint는 시작할 때 `excludeFromArticulation=True`, `jointEnabled=False`로 미리
+    만들어 두고, 결합할 때 frame을 설정한 뒤 enable만 한다.
+15. **Jazzy opennav_docking의 후진 도킹(dock_backwards)은 쓸 수 없다.** dock pose 방향을 어느
+    규약으로 줘도 조향과 backward projection 중 하나가 거꾸로 된다. 카트는
+    `amr_docking/reverse_docking.py`(자체 후진 추종, 테스트 있음)로 도킹한다.
+    충전기 전진 도킹은 docking_server를 그대로 쓴다.
+16. 충전기 마지막 ~15 cm에서는 마커가 시야 밖으로 나가므로 external_detection_timeout을
+    10초로 두었다(마지막 검출 + odom). dock_collision_threshold는 0.6.
+17. USD prim 이름에 `-`를 쓰면 안 된다(Tf ErrorException). Kit은 main 예외를 삼켜서
+    exit 0을 내므로, amr_sim은 예외가 나면 `os._exit(1)`로 끝낸다.
+18. use_sim_time 노드의 시계는 /clock을 받기 전까지 0이다. CLI의 대기 루프는 먼저 시계를
+    기다리고, 타임아웃은 `time.monotonic()`으로 잰다.
+19. 프로세스를 죽일 때 `install/amr_docking` 같은 패턴을 쓰면 안 된다. 시뮬레이터 인자에도
+    그 경로가 들어 있어서 같이 죽는다. `lib/amr_docking/`을 쓴다.
+20. `get_measured_joint_efforts`에는 카트 latch(아티큘레이션 밖 joint)의 하중이 안 들어간다
+    (정상 상태에서 ~0). 히치 effort는 서보 구동 토크 Kp·오차 − Kd·속도로 발행한다(Dynamixel 전류와 같은 의미).
+21. /clock을 TF보다 먼저 내보내면 Nav2가 아직 없는 시각의 TF를 요청해(extrapolation into the future)
+    goal이 TF_ERROR로 중단된다. 기본 BT는 이 오류에서 복구하지 않는다. TF 다음에 /clock을 낸다.
+22. 카트 캐스터는 마찰 없는 구, 뒷바퀴 축은 자유 회전이라 감쇠가 없으면 한 번 밀린 카트가 계속 굴러간다.
+    카트 body에 linear/angular damping 1.0을 준다.
+
+## 도킹과 견인 (amr_docking, 완료)
+- `ros2 run amr_docking dock_charger | undock_charger | dock_cart | release_cart`.
+- 마커, 도킹 자세, 견인 바 위치는 `amr_docking/config/docking_targets.yaml` 한 곳에서 관리한다.
+  시뮬레이터(world.py)도 이 파일을 읽는다.
+- 시뮬레이션 카트: 접이식 평대차(녹색 0.84×0.56 m 데크, 윗면 0.26 m, 흰색 손잡이)에 박스 3개, 총 22 kg.
+  마커는 데크 앞쪽 아래 금속판에 붙어 있다.
+- 충전기: WiBotic TR-302 송신기와 TC-200 안테나. 로봇 쪽은 OC-251 온보드 충전기와 RC-100 수신 코일이다.
+  공개 CAD가 없어서 데이터시트 치수로 만든 박스다. CAD의 FusionComponent(166×127×42.5 mm)가
+  OC-251(100×138×42 mm, 293 g)인지는 사용자에게 아직 확인하지 않았다.
+- 카트 결합: 갈고리를 내린 채 후진한 뒤 들어 올리고, 히치 pitch effort가 `engage_effort`를 넘는지 본다.
+  실물은 A, 시뮬레이션은 Nm이며 시뮬레이션 값은 카트 없을 때 ~0.01, 걸었을 때 1.2~2 Nm이다. 이 값은 실물에서 보정해야 한다.
+- 견인 모드(`cart_towing`): footprint를 로봇+카트 볼록 다각형으로 바꾸고, 점군에서 카트를 지우고,
+  MPPI를 0.3 m/s 이하·후진 금지로 제한하고, yaw를 passive로 둔다.
+- 1분 데모 영상 생성 스크립트: `amr_isaac/tools/demo_video/`(record.sh → compose.py).
+
+## 논문 계획과 GS 트윈 (2026-10-15 결정)
+- 사용자는 **논문 3편**을 모두 진행한다. 상세는 `docs/research_plan.md`.
+  1. 히치 자기감지 기반 미지 카트 식별 + 능동 히치(yaw) MPC 견인
+  2. 실제 공장 Gaussian Splatting 트윈에서 학습한 마커 없는 카트 결합(zero-shot sim-to-real)
+  3. 형상이 바뀌는 견인 시스템의 좁은 통로 경로계획(swept volume, 능동 히치)
+- GS 촬영: 로봇 조립 중이라 **ZED 2, Mid-360, T265를 카트 위 한 플레이트에 고정하고 높이만 바꿔 촬영**한다.
+  높이 0.2 m(로봇 D435 높이) 패스가 필수다. 방법은 `docs/gaussian_splatting.md`.
+- `amr_capture` 패키지: `capture.launch.py`(드라이버 없으면 건너뜀, mcap 기록 + SVO), `crop_operator`(미는 사람 제거),
+  `export_dataset`(bag + FAST-LIO 궤적 → COLMAP/nerfstudio, 바닥 z=0 정렬), `pcd_to_mesh`(Open3D Poisson → USDA).
+  실제 드라이버(zed_wrapper, livox_ros_driver2, FAST_LIO)와 실제 데이터로는 아직 실행해 보지 않았다.
+  합성 bag과 합성 방 점군으로만 테스트했다.
+- Isaac: `--env-usd`(GS USDZ), `--env-collision`(메시). 메시를 invisible로 하면 RTX 라이다가 못 본다.
+  `primvars:hideForCamera`를 써야 카메라에는 안 보이고 라이다에는 보인다(확인함).
+- 새 PC 세팅 전체 절차: `docs/setup_new_pc.md`. 데모 영상 도구: `amr_isaac/tools/demo_video/`.
 
 ## 남은 일 (우선순위)
-1. **2단계 카트 모델**(Isaac):
-   - 카트 URDF: 질량, 바퀴 배치, 핀 높이를 파라미터로 둔다.
-   - `hitch_coupling_link`와 카트 핀을 joint로 연결한다.
-   - 사용자에게서 카트 사양을 아직 받지 못했다.
-2. 견인 중 카트 β 추정, 라이다 점군에서 카트 걸러내기(self-filter), 꺾이는 footprint를 반영한 MPPI.
+1. 실물 검증: engage_effort 보정, indoor GPS 좌표계와 map 정합, 마커 인쇄와 부착.
+   GS 현장 촬영(시험 촬영 10 m로 전체 처리 과정을 먼저 돌려 본다), 카메라-라이다 외부 보정.
+2. 논문 1 개발: 카트 파라미터 무작위화, 히치 yaw 능동 명령, 식별기, MPC. 지금은 passive yaw로 끌기만 한다.
 3. 실측 질량, 히치 관절 한계, 서보 ID와 영점, Mid-360 점군 원점 오프셋, MDH300 피크 토크.
 4. 라이선스(LICENSE 파일 없음, Apache-2.0은 임시)와 EDGS-Org MD 드라이버 코드의 사용 권한 확인.
 5. 실제 로봇: livox_ros_driver2를 Jazzy에서 소스 빌드하고 dynamixel_sdk를 설치(`ros-jazzy-dynamixel-sdk`)한다.
