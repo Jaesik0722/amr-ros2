@@ -16,6 +16,8 @@
   <exec_depend>pointcloud_to_laserscan</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>amr_docking</exec_depend>
+  <exec_depend>opennav_docking</exec_depend>
   <!-- livox_ros_driver2 is built from source, see README. -->
 
   <export>

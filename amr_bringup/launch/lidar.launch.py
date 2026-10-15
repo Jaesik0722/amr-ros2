@@ -31,7 +31,10 @@ def generate_launch_description():
         executable='pointcloud_to_laserscan_node',
         name='pointcloud_to_laserscan',
         parameters=[os.path.join(config, 'pointcloud_to_laserscan.yaml')],
-        remappings=[('cloud_in', '/livox/lidar'), ('scan', '/scan')],
+        remappings=[('cloud_in', '/livox/lidar_filtered'), ('scan', '/scan')],
     )
 
-    return LaunchDescription([livox, to_scan])
+    # Removes a towed cart from the cloud (livox/lidar_filtered) and handles towing mode.
+    towing = Node(package='amr_docking', executable='cart_towing', output='screen')
+
+    return LaunchDescription([livox, towing, to_scan])

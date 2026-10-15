@@ -113,7 +113,7 @@ controller_server:
       vx_std: 0.2
       vy_std: 0.2
       wz_std: 0.4
-      vx_max: 0.4
+      vx_max: 0.5
       vx_min: -0.1
       vy_max: 0.5
       wz_max: 1.2
@@ -233,7 +233,7 @@ local_costmap:
           obstacle_min_range: 0.0
         # TODO: filter the towed cart out of this cloud (it moves with the hitch angle).
         livox:
-          topic: /livox/lidar
+          topic: /livox/lidar_filtered   # cart removed while towing (cart_towing)
           data_type: "PointCloud2"
           min_obstacle_height: 0.15  # floor hits when the robot pitches (see scan slice)
           max_obstacle_height: 1.2
@@ -287,7 +287,7 @@ global_costmap:
           # Ignore the robot's own antennas, handles and hitch (all within ~0.3 m).
           obstacle_min_range: 0.35
         livox:
-          topic: /livox/lidar
+          topic: /livox/lidar_filtered   # cart removed while towing (cart_towing)
           data_type: "PointCloud2"
           min_obstacle_height: 0.15  # floor hits when the robot pitches (see scan slice)
           max_obstacle_height: 1.2
@@ -407,10 +407,11 @@ velocity_smoother:
     stamp_smoothed_velocity_with_smoothing_time: False
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.4, 0.0, 1.2]
+    # Gentle ramps for a 20 kg robot that may tow a cart (MDH300: 1.6 m/s max).
+    max_velocity: [0.5, 0.0, 1.2]
     min_velocity: [-0.1, 0.0, -1.2]
-    max_accel: [0.8, 0.0, 2.0]
-    max_decel: [-1.0, 0.0, -2.5]
+    max_accel: [0.3, 0.0, 1.0]
+    max_decel: [-0.4, 0.0, -1.5]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
@@ -449,6 +450,10 @@ collision_monitor:
 
 docking_server:
   ros__parameters:
+    # Charging station: forward docking on ArUco markers (amr_docking aruco_detector,
+    # front camera -> /detected_dock_pose = docked base_footprint pose, so the
+    # external_detection_* offsets are zero). Carts are docked backwards by
+    # amr_docking dock_cart instead (Jazzy's backward docking is unreliable).
     controller_frequency: 50.0
     initial_perception_timeout: 5.0
     wait_charge_timeout: 5.0
@@ -461,31 +466,31 @@ docking_server:
     dock_backwards: false
     dock_prestaging_tolerance: 0.5
 
-    # Types of docks
-    dock_plugins: ['simple_charging_dock']
-    simple_charging_dock:
+    dock_plugins: ['charger_dock']
+    charger_dock:
       plugin: 'opennav_docking::SimpleChargingDock'
-      docking_threshold: 0.05
-      staging_x_offset: -0.7
+      docking_threshold: 0.02
+      staging_x_offset: -0.8
       use_external_detection_pose: true
-      use_battery_status: false # true
-      use_stall_detection: false # true
-
-      external_detection_timeout: 1.0
-      external_detection_translation_x: -0.18
+      use_battery_status: true       # /battery_state current > charging_threshold
+      charging_threshold: 0.5
+      use_stall_detection: false
+      # The markers leave the camera's view in the last ~15 cm: keep the last detection.
+      external_detection_timeout: 10.0
+      external_detection_translation_x: 0.0
       external_detection_translation_y: 0.0
-      external_detection_rotation_roll: -1.57
-      external_detection_rotation_pitch: -1.57
+      external_detection_rotation_roll: 0.0
+      external_detection_rotation_pitch: 0.0
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
 
-    # Dock instances
-    # The following example illustrates configuring dock instances.
-    # docks: ['home_dock']  # Input your docks here
-    # home_dock:
-    #   type: 'simple_charging_dock'
-    #   frame: map
-    #   pose: [0.0, 0.0, 0.0]
+    # Docked robot pose in the map. This is the simulator's charger
+    # (amr_isaac --charger-pose 8.3 -1.0 3.1416); set it to your station.
+    docks: ['home_charger']
+    home_charger:
+      type: 'charger_dock'
+      frame: map
+      pose: [8.096, -1.0, 0.0]
 
     controller:
       k_phi: 3.0
@@ -498,5 +503,7 @@ docking_server:
       transform_tolerance: 0.1
       projection_time: 5.0
       simulation_step: 0.1
-      dock_collision_threshold: 0.3
+      # The robot ends 1 cm from the TX antenna, which is closer than the padded
+      # footprint: ignore costmap collisions in the last 0.6 m (markers guide it).
+      dock_collision_threshold: 0.6
 

@@ -1,0 +1,34 @@
+# Recording and export settings for the Gaussian Splatting capture rig (cart-mounted).
+# Rig frame = Mid-360 IMU frame ("body" in FAST-LIO). All sensors share one plate, so the
+# extrinsics below hold at every mast height.
+
+record:
+  topics:                                  # what capture.launch.py records
+    - /livox/lidar                         # livox_ros_driver2/CustomMsg (FAST-LIO input)
+    - /livox/imu
+    - /zed/zed_node/left/image_rect_color/compressed
+    - /zed/zed_node/left/camera_info
+    - /zed/zed_node/imu/data
+    - /zed/zed_node/odom                   # ZED VIO, for comparison
+    - /t265/odom/sample                    # optional, for comparison
+    - /tf
+    - /tf_static
+
+crop_operator:                             # points removed from the cloud (rig frame, m)
+  box_min: [-1.6, -0.6, -1.5]              # the person pushing the cart, behind the rig
+  box_max: [-0.15, 0.6, 1.0]
+
+export:
+  image_topic: /zed/zed_node/left/image_rect_color/compressed
+  camera_info_topic: /zed/zed_node/left/camera_info
+  pose_topic: /Odometry                    # FAST-LIO odometry (camera_init -> body)
+  # Camera optical frame (x right, y down, z forward) in the rig frame: x y z [m], roll
+  # pitch yaw [rad]. The default is a camera 0.10 m above the lidar looking forward;
+  # replace it with the calibrated value (docs/gaussian_splatting.md, Calibration).
+  T_rig_camera: [0.05, 0.0, 0.10, -1.5707963, 0.0, -1.5707963]
+  time_offset: 0.0                         # camera stamp + offset = rig time [s]
+  min_translation: 0.05                    # keep a frame after this much motion [m]
+  min_rotation_deg: 3.0                    # ... or this much rotation
+  blur_reject_ratio: 0.5                   # drop frames sharper than this fraction of the
+                                           # running median (variance of the Laplacian)
+  max_points: 300000                       # points3D.txt from the lidar map, downsampled

@@ -1,0 +1,32 @@
+# Docking targets shared by the ArUco detector, the dock commands and the simulator.
+#
+# Target frame: on the floor below the midpoint of the two markers, x out of the
+# marker face (towards the approaching robot), y to the left, z up.
+# Marker entries are  id: y offset [m]  in that frame.
+aruco:
+  dictionary: DICT_4X4_50
+  marker_size: 0.08            # black square side [m]
+
+# Wireless charging station: WiBotic TR-302 transmitter + TC-200 transmitter antenna
+# (215 x 215 x 22 mm) facing the robot's RC-100 receiver (front, 0.117 m above the
+# floor). The robot docks forward; the front D435 sees the two markers left and right
+# of the antenna (target frame x = 0 on the antenna face). In the last ~15 cm they leave
+# the camera's view and the docking server keeps the last detection (odometry).
+charger:
+  markers: {10: 0.18, 11: -0.18}
+  marker_height: 0.15
+  # base_footprint in the target frame when docked: RX face (0.194 m ahead of
+  # base_footprint) 10 mm from the TX antenna face.
+  robot_pose: [0.204, 0.0, 3.14159]
+
+# Cart. The robot docks backwards: the rear D435 sees the markers on the front
+# lower beam, and the hitch hook ends at the tow bar.
+cart:
+  markers: {0: 0.15, 1: -0.15}
+  marker_height: 0.20
+  # base_footprint in the target frame when coupled: hook tip
+  # (hitch_coupling_link, 0.269 m behind base_footprint) at the tow bar.
+  robot_pose: [0.419, 0.0, 0.0]
+  # Cart frame = indoor GPS pose (cart centre on the floor, x towards the tow bar).
+  target_in_cart: [0.43, 0.0, 0.0]
+  tow_bar_in_cart: [0.58, 0.0, 0.115]

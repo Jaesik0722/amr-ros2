@@ -69,6 +69,8 @@ class HitchNode(Node):
         self.pub_joints = self.create_publisher(JointState, 'joint_states', 10)
         self.create_subscription(JointState, '~/command', self._on_command, 10)
         self.create_service(SetBool, '~/set_torque', self._on_set_torque)
+        # Towing: free the yaw servo (the cart steers the hitch) and keep pitch holding the bar.
+        self.create_service(SetBool, '~/set_yaw_passive', self._on_set_yaw_passive)
         self.create_timer(1.0 / p('update_rate').value, self._update)
         self.get_logger().info(f'amr_hitch is up, mode={mode_name}, ids={self.ids}.')
 
@@ -103,6 +105,21 @@ class HitchNode(Node):
     def _on_set_torque(self, request, response):
         response.success = self._set_torque(request.data)
         response.message = 'torque ' + ('on' if self.torque_enabled else 'off')
+        return response
+
+    def _on_set_yaw_passive(self, request, response):
+        i = self.names.index('hitch_yaw_joint')
+        dxl_id = self.ids[i]
+        if request.data:
+            ok = self._write(1, dxl_id, u.ADDR_TORQUE_ENABLE, 0)
+        else:
+            self.reader.txRxPacket()  # hold the current pose before re-enabling
+            if self.reader.isAvailable(dxl_id, u.ADDR_PRESENT_POSITION, 4):
+                present = self.reader.getData(dxl_id, u.ADDR_PRESENT_POSITION, 4)
+                self._write(4, dxl_id, u.ADDR_GOAL_POSITION, present)
+            ok = self._write(1, dxl_id, u.ADDR_TORQUE_ENABLE, int(self.torque_enabled))
+        response.success = ok
+        response.message = 'yaw ' + ('passive' if request.data else 'holding')
         return response
 
     def _on_command(self, msg: JointState):

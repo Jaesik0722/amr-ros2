@@ -13,6 +13,10 @@ robot**, so Nav2 and every higher-level node run unchanged on either.
 | `/livox/lidar` (PointCloud2, `livox_frame`) | livox_ros_driver2 | RTX lidar, 10 Hz full scans |
 | `/{front,rear}_camera/color/image_raw`, `.../camera_info`, `.../depth/image_rect_raw` | realsense2_camera | 640x480 @ 10 Hz, depth 32FC1 [m] |
 | `/clock` | – | sim time, use `use_sim_time:=true` |
+| `/amr_hitch/set_yaw_passive` (SetBool) | amr_hitch | yaw joint free while towing |
+| `/battery_state` (BatteryState) | battery / OC-251 | +5 A while the RC-100 is on the TC-200 (±4 cm, ±10°) |
+| `/indoor_gps/cart` (PoseStamped, map) | indoor GPS | cart pose, 5 Hz, 2 cm / 1° noise |
+| `/cart/latched` (Bool) | – | ground truth of the hook coupling |
 
 This directory is not a colcon package (`COLCON_IGNORE`): it runs inside Isaac Sim's
 Python 3.11 with Isaac's bundled ROS 2 Jazzy libraries, not the system Python 3.12.
@@ -43,8 +47,19 @@ ros2 topic pub --once /amr_hitch/command sensor_msgs/msg/JointState \
 
 `run_sim.sh` options: `--headless`, `--env warehouse|empty`, `--no-cameras`,
 `--no-lidar`, `--chase-camera` (third-person view on `/sim/chase_camera/image_raw`),
+`--overview-camera X Y Z TX TY TZ` (fixed view on `/sim/overview_camera/image_raw`),
 `--no-realtime`, `--reimport` (force URDF reconversion),
 `--selftest` (scripted drive/hitch checks, exits 0 on pass).
+
+Real-site twin (see [docs/gaussian_splatting.md](../docs/gaussian_splatting.md)):
+`--env-usd A.usdz [B.usd ...]` references visual environments (e.g. a 3DGRUT NuRec
+USDZ) instead of `--env`; `--env-collision mesh.usda` adds static triangle-mesh colliders
+that the RTX lidar sees but cameras do not (`primvars:hideForCamera`; an invisible prim
+would be ignored by the lidar too). `--env-collision-visible` shows the mesh. A hidden
+ground plane at z = 0 carries the robot.
+
+Demo video: `tools/demo_video/` (`record.sh` runs the docking/towing scenario and grabs
+all views, `compose.py` builds the captioned 2x2 video from its event log).
 
 ## Model notes
 
@@ -62,8 +77,26 @@ ros2 topic pub --once /amr_hitch/command sensor_msgs/msg/JointState \
 - `--selftest` checks: 0.3 m/s straight, 0.5 rad/s in place, cmd_vel timeout stop,
   hitch position tracking. All match the command within 1 % (empty floor and warehouse).
 
+## Cart and charging station
+
+`world.py` adds them when `amr_docking` is built (`--no-cart`, `--no-charger`,
+`--cart-pose X Y YAW` default 3.0 -7.5 1.571, `--charger-pose X Y YAW` default 8.3 -1.0 3.142).
+Marker ids/positions and the tow bar come from `amr_docking/config/docking_targets.yaml`.
+
+- Cart: folding platform cart (0.84 x 0.56 m green deck, top 0.26 m, white handle)
+  loaded with three cardboard boxes, 22 kg in total; rear wheels on axles, front casters as
+  frictionless spheres; ArUco 0/1 on a plate under the front deck edge; tow bar (visual
+  only). Linear/angular damping 1.0 stands in for rolling resistance (~7 N at 0.3 m/s).
+- Coupling: raising the hitch pitch above 0.1 rad with the hook within 3 cm (horizontal)
+  of the bar enables a revolute joint (bar axis) between hitch_pitch_link and the cart;
+  lowering it below 0 releases. The hook then carries the tongue load, which is what
+  `dock_cart` checks through the hitch effort. The simulator reports the hitch effort as
+  the servo drive torque kp·error − kd·velocity (like the Dynamixel current): ~0.01 Nm
+  without a cart, 1.2-3 Nm hooked.
+- Charger: WiBotic TC-200 antenna (215 x 215 x 22 mm, centre 0.117 m) and TR-302 box on a
+  stand, datasheet sizes (no public CAD); ArUco 10/11 left and right of the antenna.
+
 ## Known limitations / next steps
 
-- The towed cart is not modelled yet (phase 2: cart URDF + hitch coupling).
 - Depth is published as 32FC1 metres; the realsense driver publishes 16UC1 millimetres.
 - Isaac Sim may print a segfault on exit; it happens after shutdown and is harmless.

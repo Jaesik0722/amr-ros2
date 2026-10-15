@@ -43,7 +43,7 @@ mass_rules:
   - {match: 'BT_Antenna_Assem.2|', mass: 0.02, note: ASSUMED}
   - {match: 'Part12.1|', density: 2.2, note: ASSUMED battery block}
   - {match: 'FusionComponent.1|', density: 1.5, note: ASSUMED unknown block}
-  - {match: 'Product9.2|Product9.1 / Part1.1|', density: 1.8, note: ASSUMED wireless charging RX coil}
+  - {match: 'Product9.2|Product9.1 / Part1.1|', mass: 0.16, note: WiBotic RC-100 receiver coil datasheet}
   - {match: 'Product5.', density: 1.5, note: ASSUMED casters}
   - {match: 'Flange Nut', density: 7.85, note: steel}
   - {match: 'Washer', density: 7.85, note: steel}

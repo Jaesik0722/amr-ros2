@@ -51,7 +51,12 @@ def generate_launch_description():
             name='pointcloud_to_laserscan',
             parameters=[os.path.join(bringup, 'config', 'pointcloud_to_laserscan.yaml'),
                         {'use_sim_time': True}],
-            remappings=[('cloud_in', '/livox/lidar'), ('scan', '/scan')],
+            remappings=[('cloud_in', '/livox/lidar_filtered'), ('scan', '/scan')],
+        ),
+        # Removes a towed cart from the cloud and switches Nav2 to towing mode.
+        Node(
+            package='amr_docking', executable='cart_towing', output='screen',
+            parameters=[{'use_sim_time': True}],
         ),
         Node(
             package='rviz2', executable='rviz2', output='log',
@@ -71,6 +76,9 @@ def generate_launch_description():
         include(os.path.join(bringup, 'launch', 'navigation.launch.py'),
                 {**sim_time, 'map': LaunchConfiguration('map'), 'params_file': params},
                 IfCondition(nav_on_map)),
+        # Charger / cart docking (ArUco detectors + cart docking server) with Nav2.
+        include(os.path.join(bringup, 'launch', 'docking.launch.py'), sim_time,
+                IfCondition(nav)),
         include(os.path.join(bringup, 'launch', 'joystick.launch.py'),
                 condition=IfCondition(LaunchConfiguration('joystick'))),
     ])

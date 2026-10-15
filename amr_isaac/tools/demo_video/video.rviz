@@ -1,0 +1,120 @@
+Panels: []
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Reference Frame: odom
+      Cell Size: 1
+      Plane Cell Count: 40
+    - Class: rviz_default_plugins/Map
+      Name: Map
+      Enabled: true
+      Topic:
+        Value: /map
+        Durability Policy: Transient Local
+    - Class: rviz_default_plugins/Map
+      Name: Local costmap
+      Enabled: false
+      Color Scheme: costmap
+      Alpha: 0.5
+      Topic:
+        Value: /local_costmap/costmap
+    - Class: rviz_default_plugins/Map
+      Name: Global costmap
+      Enabled: false
+      Color Scheme: costmap
+      Alpha: 0.35
+      Topic:
+        Value: /global_costmap/costmap
+    - Class: rviz_default_plugins/Path
+      Name: Global plan
+      Enabled: true
+      Color: 40; 255; 40
+      Line Style: Billboards
+      Line Width: 0.1
+      Topic:
+        Value: /plan
+    - Class: rviz_default_plugins/Polygon
+      Name: Footprint
+      Enabled: true
+      Color: 255; 220; 0
+      Topic:
+        Value: /local_costmap/published_footprint
+    - Class: rviz_default_plugins/Pose
+      Name: Cart (indoor GPS)
+      Enabled: true
+      Shape: Axes
+      Axes Length: 0.6
+      Axes Radius: 0.06
+      Topic:
+        Value: /indoor_gps/cart
+    - Class: rviz_default_plugins/Pose
+      Name: Goal
+      Enabled: true
+      Shape: Arrow
+      Color: 255; 0; 255
+      Shaft Length: 0.8
+      Shaft Radius: 0.08
+      Head Length: 0.35
+      Head Radius: 0.2
+      Topic:
+        Value: /video_goal
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+      Visual Enabled: false
+      Collision Enabled: true
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Show Names: true
+      Marker Scale: 0.3
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Mid-360
+      Enabled: true
+      Topic:
+        Value: /livox/lidar
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Color: 0; 200; 255
+    - Class: rviz_default_plugins/LaserScan
+      Name: Scan
+      Enabled: false
+      Topic:
+        Value: /scan
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 5
+      Color Transformer: FlatColor
+      Color: 255; 30; 30
+  Global Options:
+    Fixed Frame: map
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Target Frame: map
+      Scale: 52
+      X: 4.3
+      Y: -3.6
+      Angle: 0
+Window Geometry:
+  Hide Left Dock: true
+  Hide Right Dock: true
+  Width: 960
+  Height: 540

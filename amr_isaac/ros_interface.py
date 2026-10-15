@@ -6,6 +6,7 @@ Real robot (amr_base + amr_hitch)        Simulator (this node)
   pub  /joint_states (wheels, hitch)       same, hitch effort = joint torque [Nm]
   sub  /amr_hitch/command (JointState)     same
   srv  /amr_hitch/set_torque (SetBool)     same, torque off = passive hitch
+  srv  /amr_hitch/set_yaw_passive          same, only the yaw joint free (towing)
   -                                        pub /clock (use_sim_time:=true)
 """
 
@@ -43,6 +44,8 @@ class SimRosInterface:
         n.create_subscription(Twist, 'cmd_vel', self._on_cmd, 10)
         n.create_subscription(JointState, 'amr_hitch/command', self._on_hitch, 10)
         n.create_service(SetBool, 'amr_hitch/set_torque', self._on_torque)
+        n.create_service(SetBool, 'amr_hitch/set_yaw_passive', self._on_yaw_passive)
+        self.yaw_passive = False
         self.pub_odom = n.create_publisher(Odometry, 'odom', 10)
         self.pub_tf = n.create_publisher(TFMessage, 'tf', 50)
         self.pub_joints = n.create_publisher(JointState, 'joint_states', 10)
@@ -79,6 +82,12 @@ class SimRosInterface:
         self.hitch_torque = req.data
         res.success = True
         res.message = 'torque ' + ('on' if req.data else 'off')
+        return res
+
+    def _on_yaw_passive(self, req, res):
+        self.yaw_passive = req.data
+        res.success = True
+        res.message = 'yaw ' + ('passive' if req.data else 'holding')
         return res
 
     def wheel_targets(self):

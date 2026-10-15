@@ -1,0 +1,21 @@
+# zed_wrapper overrides for capture (ros2 launch zed_wrapper zed_camera.launch.py
+# camera_model:=zed2 ros_params_override_path:=<this file>). Fixed exposure, gain and
+# white balance keep the colours consistent across the scene; short exposure limits
+# rolling-shutter and motion blur. Check the names against your zed_wrapper version
+# (ros2 param list /zed/zed_node).
+/**:
+  ros__parameters:
+    general:
+      grab_resolution: 'HD1080'
+      grab_frame_rate: 30
+      pub_frame_rate: 15.0          # recorded image rate; SVO keeps the full 30 fps
+    video:
+      auto_exposure_gain: false
+      exposure: 30                  # % of the frame time; as low as the lighting allows
+      gain: 30
+      auto_whitebalance: false
+      whitebalance_temperature: 50  # x100 K
+    depth:
+      depth_mode: 'NONE'            # not needed; saves GPU
+    pos_tracking:
+      pos_tracking_enabled: true    # ZED VIO odom, recorded for comparison only

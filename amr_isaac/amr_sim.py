@@ -19,13 +19,32 @@ ap.add_argument('--urdf', required=True, help='expanded URDF with absolute mesh 
 ap.add_argument('--usd-dir', required=True, help='cache directory for the converted robot')
 ap.add_argument('--headless', action='store_true')
 ap.add_argument('--env', default='warehouse', choices=['warehouse', 'empty'])
+ap.add_argument('--env-usd', nargs='+', metavar='USD',
+                help='custom environment instead of --env: USD/USDZ files referenced into '
+                     'the stage, e.g. a 3DGRUT NuRec .usdz (docs/gaussian_splatting.md)')
+ap.add_argument('--env-collision', metavar='USD',
+                help='mesh of the custom environment (from the lidar map): static colliders, '
+                     'hidden from cameras unless --env-collision-visible')
+ap.add_argument('--env-collision-visible', action='store_true')
 ap.add_argument('--no-cameras', action='store_true')
 ap.add_argument('--no-lidar', action='store_true')
 ap.add_argument('--chase-camera', action='store_true',
                 help='publish a third-person view on /sim/chase_camera/image_raw')
+ap.add_argument('--overview-camera', type=float, nargs=6,
+                metavar=('X', 'Y', 'Z', 'TX', 'TY', 'TZ'),
+                help='fixed camera from (X,Y,Z) towards (TX,TY,TZ) on '
+                     '/sim/overview_camera/image_raw')
 ap.add_argument('--no-realtime', action='store_true', help='run as fast as possible')
 ap.add_argument('--selftest', action='store_true',
                 help='drive a scripted sequence without ROS input, print results and exit')
+ap.add_argument('--targets', help='amr_docking docking_targets.yaml (enables cart/charger)')
+ap.add_argument('--markers', help='directory with the aruco_<id>.png markers')
+ap.add_argument('--cart-pose', type=float, nargs=3, default=[3.0, -7.5, math.pi / 2],
+                metavar=('X', 'Y', 'YAW'), help='cart frame in the world/map frame')
+ap.add_argument('--charger-pose', type=float, nargs=3, default=[8.3, -1.0, math.pi],
+                metavar=('X', 'Y', 'YAW'), help='charger target frame in the world/map frame')
+ap.add_argument('--no-cart', action='store_true')
+ap.add_argument('--no-charger', action='store_true')
 ap.add_argument('--reimport', action='store_true', help='reconvert the URDF even if cached')
 args = ap.parse_args()
 
@@ -51,6 +70,7 @@ app.update()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mid360 import create_mid360  # noqa: E402, I100
 from ros_interface import SimRosInterface  # noqa: E402
+from world import DockingWorld  # noqa: E402
 
 ROBOT = '/World/amr'
 # Same values as amr_base/config/base.yaml and amr_hitch/config/hitch.yaml.
@@ -189,7 +209,34 @@ def linearize_cad_colours(stage):
                 q.SetCustomDataByKey('amr:linearized', True)
 
 
+def add_custom_environment(stage):
+    """Real-site twin: visuals (e.g. Gaussian splats) + a lidar-map mesh for physics."""
+    for i, path in enumerate(args.env_usd or []):
+        add_reference_to_stage(os.path.abspath(os.path.expanduser(path)), f'/World/env_{i}')
+    # Ground plane for physics at z = 0 (the capture is aligned so the floor is z = 0),
+    # hidden so the reconstructed floor shows.
+    from isaacsim.core.api.objects import GroundPlane
+    GroundPlane('/World/ground', size=200.0, visible=False)
+    if args.env_collision:
+        col = '/World/env_collision'
+        add_reference_to_stage(os.path.abspath(os.path.expanduser(args.env_collision)), col)
+        for q in Usd.PrimRange(stage.GetPrimAtPath(col)):
+            if q.IsA(UsdGeom.Mesh):
+                UsdPhysics.CollisionAPI.Apply(q)
+                UsdPhysics.MeshCollisionAPI.Apply(q).CreateApproximationAttr('none')
+                if not args.env_collision_visible:
+                    # Hidden from cameras but still hit by the RTX lidar (which ignores
+                    # invisible prims).
+                    UsdGeom.PrimvarsAPI(q).CreatePrimvar(
+                        'hideForCamera', Sdf.ValueTypeNames.Bool).Set(True)
+    light = stage.DefinePrim('/World/light', 'DomeLight')
+    light.CreateAttribute('inputs:intensity', Sdf.ValueTypeNames.Float).Set(1000.0)
+
+
 def add_environment(stage):
+    if args.env_usd or args.env_collision:
+        add_custom_environment(stage)
+        return
     if args.env == 'warehouse':
         root = get_assets_root_path()
         if root:
@@ -245,9 +292,8 @@ def add_camera(stage, link, name, topic_ns, writers):
     return (link, frame, (0.0, 0.0, 0.0), (-0.5, 0.5, -0.5, 0.5))
 
 
-def add_chase_camera(stage, writers, eye=(-1.1, -0.9, 0.8), target=(0.15, 0.0, 0.2)):
-    """Third-person camera that follows the robot (for videos and demos)."""
-    path = f'{ROBOT}/base_footprint/chase_camera'
+def add_view_camera(stage, writers, path, eye, target, topic, resolution=(960, 540)):
+    """Demo camera looking from eye to target (in its parent's frame), RGB on `topic`."""
     cam = UsdGeom.Camera.Define(stage, path)
     eye, target = Gf.Vec3d(*eye), Gf.Vec3d(*target)
     z = (eye - target).GetNormalized()            # USD cameras look along -Z
@@ -260,12 +306,12 @@ def add_chase_camera(stage, writers, eye=(-1.1, -0.9, 0.8), target=(0.15, 0.0, 0
     xf.AddOrientOp().Set(Gf.Quatf(Gf.Matrix4d(rot, Gf.Vec3d(0)).ExtractRotationQuat()))
     cam.CreateFocalLengthAttr(18.0)
     cam.CreateHorizontalApertureAttr(24.0)
-    cam.CreateVerticalApertureAttr(13.5)
+    cam.CreateVerticalApertureAttr(24.0 * resolution[1] / resolution[0])
     cam.CreateClippingRangeAttr(Gf.Vec2f(0.05, 100.0))
-    rp = rep.create.render_product(path, (1280, 720))
+    rp = rep.create.render_product(path, resolution)
     rgb = osd.SyntheticData.convert_sensor_type_to_rendervar('Rgb')
     wr = rep.writers.get(f'{rgb}ROS2PublishImage')
-    wr.initialize(topicName='sim/chase_camera/image_raw', frameId='chase_camera')
+    wr.initialize(topicName=topic, frameId=path.split('/')[-1])
     wr.attach([rp])
     writers.append(wr)
 
@@ -347,10 +393,30 @@ def main():
         optical.append(add_camera(stage, 'front_camera_link', 'd435', 'front_camera', writers))
         optical.append(add_camera(stage, 'rear_camera_link', 'd435', 'rear_camera', writers))
 
-    if args.chase_camera:
-        add_chase_camera(stage, writers)
+    if args.chase_camera:   # follows the robot
+        add_view_camera(stage, writers, f'{ROBOT}/base_footprint/chase_camera',
+                        (-1.1, -0.9, 0.8), (0.15, 0.0, 0.2), 'sim/chase_camera/image_raw',
+                        (1280, 720))
+    if args.overview_camera:  # fixed in the world
+        e = args.overview_camera
+        add_view_camera(stage, writers, '/World/overview_camera', e[:3], e[3:],
+                        'sim/overview_camera/image_raw')
+
+    docking = None
+    if args.targets:
+        tyre = physics_material(stage, '/World/Physics/cart_tyre', 0.9, 0.8, 'average')
+        caster = stage.GetPrimAtPath('/World/Physics/caster')
+        docking = DockingWorld(stage, args.targets, args.markers,
+                               None if args.no_cart else args.cart_pose,
+                               None if args.no_charger else args.charger_pose,
+                               (tyre, UsdShade.Material(caster)),
+                               lambda prim, mat: UsdShade.MaterialBindingAPI.Apply(prim).Bind(
+                                   mat, UsdShade.Tokens.weakerThanDescendants, 'physics'))
 
     robot = world.scene.add(SingleArticulation(ROBOT, name='amr'))
+    ros = SimRosInterface(CFG, HITCH)
+    if docking:
+        docking.attach_ros(ros.node, SingleArticulation, world)
     world.reset()
     names = robot.dof_names
     wheel_idx = np.array([names.index(j) for j in WHEELS])
@@ -365,11 +431,19 @@ def main():
     efforts[hitch_idx] = CFG['hitch_max_torque']
     ctrl.set_max_efforts(efforts)
 
-    ros = SimRosInterface(CFG, HITCH)
     ros.publish_static([(p, c, xyz, q) for p, c, xyz, q in optical])
-    torque_on = True
+    hitch_state = (True, False)   # (torque on, yaw passive)
     state_every = int(PHYSICS_HZ / STATE_HZ)
     step = {'n': 0}
+    world_every = int(STATE_HZ / 5)   # GPS, battery: 5 Hz (GPS jitter like 8 Hz beacons)
+
+    def robot_state():
+        q = robot.get_joint_positions()
+        return (robot.get_world_pose(), float(q[names.index('hitch_yaw_joint')]),
+                float(q[names.index('hitch_pitch_joint')]))
+
+    if docking:
+        docking.set_robot_state_fn(robot_state, lambda: ros.hitch_target['hitch_pitch_joint'])
 
     def on_physics(dt):
         t = world.current_time
@@ -383,7 +457,6 @@ def main():
             joint_indices=hitch_idx))
         if step['n'] % state_every:
             return
-        ros.publish_clock(t)
         ros.spin_once()  # commands are handled at STATE_HZ, independent of rendering
         pos, quat = robot.get_world_pose()  # articulation root = base_footprint
         w, x, y, z = quat
@@ -391,11 +464,20 @@ def main():
         lin, ang = robot.get_linear_velocity(), robot.get_angular_velocity()
         vx = math.cos(yaw) * lin[0] + math.sin(yaw) * lin[1]
         q, qd = robot.get_joint_positions(), robot.get_joint_velocities()
-        tau = robot.get_measured_joint_efforts()
+        tau = np.array(robot.get_measured_joint_efforts(), dtype=float)
+        # Hitch effort = servo drive torque (what the Dynamixel current reflects). The
+        # measured joint effort misses loads from the cart latch (a non-articulation joint).
+        for j, i in zip(HITCH, hitch_idx):
+            tau[i] = np.clip(kps[i] * (ros.hitch_target[j] - q[i]) - kds[i] * qd[i],
+                             -CFG['hitch_max_torque'], CFG['hitch_max_torque'])
         idx = list(wheel_idx) + list(hitch_idx)
         ros.publish_state(t, float(pos[0]), float(pos[1]), yaw, vx, float(ang[2]),
                           [names[i] for i in idx], [float(q[i]) for i in idx],
                           [float(qd[i]) for i in idx], [float(tau[i]) for i in idx])
+        # /clock after the TF for that time, so nodes never ask for a future transform.
+        ros.publish_clock(t)
+        if docking and (step['n'] // state_every) % world_every == 0:
+            docking.publish(t, world_every / STATE_HZ, (pos, quat))
 
     world.add_physics_callback('amr_control', on_physics)
     if args.selftest:
@@ -406,13 +488,18 @@ def main():
     try:
         while app.is_running():
             world.step(render=True)
-            if ros.hitch_torque != torque_on:
-                torque_on = ros.hitch_torque
-                if torque_on:  # hold the current pose, like amr_hitch does on torque-on
-                    q = robot.get_joint_positions()
-                    ros.hitch_target.update({j: float(q[names.index(j)]) for j in HITCH})
-                kps[hitch_idx] = CFG['hitch_kp'] if torque_on else 0.0
-                kds[hitch_idx] = CFG['hitch_kd'] if torque_on else 0.05  # bearing friction
+            if docking:
+                docking.apply_requests()
+            state = (ros.hitch_torque, ros.yaw_passive)
+            if state != hitch_state:
+                hitch_state = state
+                q = robot.get_joint_positions()
+                for j in HITCH:   # hold the current pose, like amr_hitch on torque-on
+                    ros.hitch_target[j] = float(q[names.index(j)])
+                for j in HITCH:
+                    on = ros.hitch_torque and not (j == 'hitch_yaw_joint' and ros.yaw_passive)
+                    kps[names.index(j)] = CFG['hitch_kp'] if on else 0.0
+                    kds[names.index(j)] = CFG['hitch_kd'] if on else 0.05  # bearing friction
                 ctrl.set_gains(kps=kps, kds=kds)
             if not args.no_realtime:
                 ahead = (world.current_time - sim0) - (time.time() - wall0)
@@ -424,4 +511,9 @@ def main():
     app.close()
 
 
-main()
+try:
+    main()
+except Exception:  # Kit swallows the exit code otherwise
+    import traceback
+    traceback.print_exc()
+    os._exit(1)

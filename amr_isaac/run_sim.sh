@@ -16,6 +16,11 @@ if ! command -v xacro >/dev/null; then source /opt/ros/jazzy/setup.bash; fi
 if [ -n "${AMR_WS:-}" ]; then source "$AMR_WS/install/setup.bash"; fi
 set -u
 SHARE="$(ros2 pkg prefix amr_description)/share/amr_description"
+# Cart and charging station (docking targets and markers come from amr_docking).
+DOCKING_ARGS=()
+if DOCKING="$(ros2 pkg prefix amr_docking 2>/dev/null)/share/amr_docking" && [ -d "$DOCKING" ]; then
+  DOCKING_ARGS=(--targets "$DOCKING/config/docking_targets.yaml" --markers "$DOCKING/markers")
+fi
 xacro "$SHARE/urdf/amr.urdf.xacro" | sed "s#package://amr_description/#$SHARE/#g" > "$CACHE/amr.urdf.new"
 if ! cmp -s "$CACHE/amr.urdf.new" "$CACHE/amr.urdf"; then mv "$CACHE/amr.urdf.new" "$CACHE/amr.urdf"; else rm "$CACHE/amr.urdf.new"; fi
 
@@ -28,4 +33,4 @@ exec env -i HOME="$HOME" USER="${USER:-}" PATH=/usr/bin:/bin TERM="${TERM:-xterm
   ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}" \
   ${ROS_AUTOMATIC_DISCOVERY_RANGE:+ROS_AUTOMATIC_DISCOVERY_RANGE=$ROS_AUTOMATIC_DISCOVERY_RANGE} \
   LD_LIBRARY_PATH="$ISAAC_PKG/exts/isaacsim.ros2.bridge/jazzy/lib" \
-  "$ISAAC_PYTHON" "$HERE/amr_sim.py" --urdf "$CACHE/amr.urdf" --usd-dir "$CACHE/usd" "$@"
+  "$ISAAC_PYTHON" "$HERE/amr_sim.py" --urdf "$CACHE/amr.urdf" --usd-dir "$CACHE/usd" "${DOCKING_ARGS[@]}" "$@"
