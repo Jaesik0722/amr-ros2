@@ -4,3 +4,24 @@ log/
 __pycache__/
 *.pyc
 .pytest_cache/
+# Isaac Lab training runs and checkpoints (amr_lab). colcon writes log/ above; rsl_rl
+# writes logs/ here.
+logs/
+
+*.aux
+*.bbl
+*.blg
+*.synctex.gz
+
+# Working notes and the paper, kept out of the repository on purpose: they are moved to
+# the robot by hand, and the paper is not published from here.
+docs/
+CLAUDE.md
+
+# Editor and LaTeX scratch files
+*.bak
+*.r[0-9]bak
+*.prefill
+*.preflow
+*.fls
+*.fdb_latexmk
