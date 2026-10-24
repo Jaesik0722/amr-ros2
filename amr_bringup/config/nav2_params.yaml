@@ -468,6 +468,9 @@ docking_server:
     dock_plugins: ['charger_dock']
     charger_dock:
       plugin: 'opennav_docking::SimpleChargingDock'
+      # Not consulted while use_battery_status is true: isDocked() then reads the
+      # charging current, not the distance. Halving this to 0.01 left E1's longitudinal
+      # error unchanged (+9.19 -> +9.22 mm), which is how that was established.
       docking_threshold: 0.02
       staging_x_offset: -0.8
       use_external_detection_pose: true
