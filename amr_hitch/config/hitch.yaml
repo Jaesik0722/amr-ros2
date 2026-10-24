@@ -2,7 +2,9 @@ amr_hitch:
   ros__parameters:
     port: /dev/ttyDynamixel
     baudrate: 1000000
-    # TODO: set to the actual servo IDs (the old node configured BROADCAST_ID).
+    # The ids are assumed, not read off the servos: the previous node addressed them by
+    # BROADCAST_ID, so nothing here has ever seen the real ones. Scan the bus before the
+    # first run.
     joint_names: [hitch_yaw_joint, hitch_pitch_joint]
     ids: [1, 2]
     zero_ticks: [2048, 2048]   # Raw position where each joint is at 0 rad.

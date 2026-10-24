@@ -97,7 +97,8 @@
   <!--
     2-DOF towing hitch, two Dynamixel XM540-W270.
     Yaw axis: vertical, 176.8 mm behind the axle. Pitch axis: lateral, 42.2 mm behind yaw.
-    TODO: mechanical joint limits (copied from the previous URDF).
+    The joint limits below are carried over from the previous URDF. They have not been
+    measured against the mechanism, so they bound the model rather than the hardware.
   -->
   <joint name="hitch_yaw_joint" type="revolute">
     <parent link="base_link"/>
@@ -145,8 +146,10 @@
 
   <!--
     Livox Mid-360, frame at the centre of the mounting face (CAD: x = -18.05, z = 263 mm).
-    TODO: the point cloud origin sits above the mounting face; add that offset from the
-    Mid-360 user manual before using the cloud for 3D LIO.
+    The sensor's point cloud origin sits above that face, and the offset between the two
+    is not applied here: this frame is the mounting face, not the optical origin. The
+    scan slice tolerates that; 3D LIO does not, so take the offset from the Mid-360
+    manual before using the cloud for it.
   -->
   <joint name="livox_joint" type="fixed">
     <parent link="base_link"/>
