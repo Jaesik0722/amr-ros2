@@ -43,6 +43,15 @@ ap.add_argument('--cart-pose', type=float, nargs=3, default=[3.0, -7.5, math.pi 
                 metavar=('X', 'Y', 'YAW'), help='cart frame in the world/map frame')
 ap.add_argument('--charger-pose', type=float, nargs=3, default=[8.3, -1.0, math.pi],
                 metavar=('X', 'Y', 'YAW'), help='charger target frame in the world/map frame')
+ap.add_argument('--corridor', type=float, nargs='+', metavar='W',
+                help='narrow-passage experiment: corridor width [m], optionally followed '
+                     'by X0 X1 Y (default 3.0 5.5 -4.5), as two walls 0.6 m high')
+ap.add_argument('--cart-mass', type=float, default=22.0,
+                help='cart mass incl. load [kg] (experiments vary it)')
+ap.add_argument('--cart-wheels', choices=('trailer', 'caster4'), default='trailer',
+                help='cart wheels: trailer = swivel casters at the front and fixed '
+                     'axles at the back (a heading the hitch angle is measured against), '
+                     'caster4 = swivel casters all round (a free body that is pushed)')
 ap.add_argument('--no-cart', action='store_true')
 ap.add_argument('--no-charger', action='store_true')
 ap.add_argument('--reimport', action='store_true', help='reconvert the URDF even if cached')
@@ -70,7 +79,7 @@ app.update()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mid360 import create_mid360  # noqa: E402, I100
 from ros_interface import SimRosInterface  # noqa: E402
-from world import DockingWorld  # noqa: E402
+from world import box, DockingWorld  # noqa: E402
 
 ROBOT = '/World/amr'
 # Same values as amr_base/config/base.yaml and amr_hitch/config/hitch.yaml.
@@ -88,6 +97,11 @@ WHEELS = ['left_wheel_joint', 'right_wheel_joint']
 HITCH = ['hitch_yaw_joint', 'hitch_pitch_joint']
 # Render rate = lidar scan rate, so each point cloud is one full revolution.
 PHYSICS_HZ, RENDER_HZ, STATE_HZ = 200.0, 10.0, 50.0
+
+
+def yaw_quat(yaw):
+    """Quaternion (w, x, y, z) for a rotation about z."""
+    return np.array([math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)])
 
 
 def import_robot():
@@ -233,12 +247,46 @@ def add_custom_environment(stage):
     light.CreateAttribute('inputs:intensity', Sdf.ValueTypeNames.Float).Set(1000.0)
 
 
+def add_corridor(stage, params):
+    """Build a passage that is the only way across (narrow-passage experiments).
+
+    Two parallel walls form the passage itself (x0..x1 at y +- width/2), and wings at
+    the x0 face run out to the edges of the driveable area. Without the wings the walls
+    are two free-standing obstacles in open floor and Nav2 simply plans around them, so
+    nothing is ever measured inside the passage.
+
+    params: WIDTH [X0 X1 Y].
+    """
+    defaults = [3.0, 5.5, -4.5]
+    width = params[0]
+    x0, x1, y = (list(params[1:4]) + defaults[len(params) - 1:])[:3]
+    length, height, thickness = x1 - x0, 0.6, 0.1
+    y_min, y_max = -9.0, 1.0          # beyond the driveable part of the warehouse
+    grey = (0.35, 0.35, 0.37)
+    stage.DefinePrim('/World/corridor', 'Xform')
+    half = (width + thickness) / 2.0
+    for side, name in ((1, 'left'), (-1, 'right')):
+        box(stage, f'/World/corridor/wall_{name}', (length, thickness, height),
+            (0.5 * (x0 + x1), y + side * half, height / 2.0), grey)
+    for side, name, far in ((1, 'wing_left', y_max), (-1, 'wing_right', y_min)):
+        span = abs(far - (y + side * half))
+        box(stage, f'/World/corridor/{name}', (thickness, span, height),
+            (x0, 0.5 * (far + y + side * half), height / 2.0), grey)
+    return (width, x0, x1, y)
+
+
 def add_environment(stage):
     if args.env_usd or args.env_collision:
         add_custom_environment(stage)
         return
     if args.env == 'warehouse':
-        root = get_assets_root_path()
+        # get_assets_root_path() raises when the asset server cannot be reached rather
+        # than returning None, and a transient network hiccup then kills the whole run.
+        try:
+            root = get_assets_root_path()
+        except RuntimeError as e:
+            print(f'[amr_sim] asset server: {e}', flush=True)
+            root = None
         if root:
             add_reference_to_stage(root + '/Isaac/Environments/Simple_Warehouse/warehouse.usd',
                                    '/World/env')
@@ -381,6 +429,10 @@ def main():
                   rendering_dt=1.0 / RENDER_HZ)
     stage = world.stage
     add_environment(stage)
+    if args.corridor:
+        geometry = add_corridor(stage, list(args.corridor))
+        print(f'[amr_sim] corridor width {geometry[0]:.2f} m at y {geometry[3]:.2f}',
+              flush=True)
     add_reference_to_stage(import_robot(), ROBOT)
     UsdGeom.Xformable(stage.GetPrimAtPath(ROBOT)).ClearXformOpOrder()
     UsdGeom.Xformable(stage.GetPrimAtPath(ROBOT)).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0.002))
@@ -411,7 +463,9 @@ def main():
                                None if args.no_charger else args.charger_pose,
                                (tyre, UsdShade.Material(caster)),
                                lambda prim, mat: UsdShade.MaterialBindingAPI.Apply(prim).Bind(
-                                   mat, UsdShade.Tokens.weakerThanDescendants, 'physics'))
+                                   mat, UsdShade.Tokens.weakerThanDescendants, 'physics'),
+                               cart_mass=args.cart_mass,
+                               cart_wheels=args.cart_wheels)
 
     robot = world.scene.add(SingleArticulation(ROBOT, name='amr'))
     ros = SimRosInterface(CFG, HITCH)
@@ -444,6 +498,31 @@ def main():
 
     if docking:
         docking.set_robot_state_fn(robot_state, lambda: ros.hitch_target['hitch_pitch_joint'])
+
+    def apply_set_state(request):
+        """Place the robot (and cart) for the next trial of a repeated experiment.
+
+        Only for experiments (/sim/set_state); the real robot has no such interface.
+        A latched cart is released first: the latch joint frames are set on engage.
+        """
+        (rx, ry, ryaw), cart = request
+        if docking and docking.latched:
+            docking.latch_request = False
+            docking.apply_requests()
+        ros.cmd, ros.cmd_time = (0.0, 0.0), -1e9
+        for j in HITCH:
+            ros.hitch_target[j] = 0.0
+        zeros3 = np.zeros(3)
+        robot.set_world_pose(np.array([rx, ry, 0.002]), yaw_quat(ryaw))
+        robot.set_linear_velocity(zeros3)
+        robot.set_angular_velocity(zeros3)
+        robot.set_joint_positions(np.zeros(len(names)))
+        robot.set_joint_velocities(np.zeros(len(names)))
+        if cart is not None and docking and docking.cart is not None:
+            cx, cy, cyaw = cart
+            docking.cart.set_world_pose(np.array([cx, cy, 0.0]), yaw_quat(cyaw))
+            docking.cart.set_linear_velocity(zeros3)
+            docking.cart.set_angular_velocity(zeros3)
 
     def on_physics(dt):
         t = world.current_time
@@ -490,6 +569,9 @@ def main():
             world.step(render=True)
             if docking:
                 docking.apply_requests()
+            if ros.set_state is not None:
+                apply_set_state(ros.set_state)
+                ros.set_state = None
             state = (ros.hitch_torque, ros.yaw_passive)
             if state != hitch_state:
                 hitch_state = state

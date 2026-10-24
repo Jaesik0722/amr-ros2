@@ -118,16 +118,31 @@ class Commander(Node):
                                           position=[0.0, pitch]))
         self.wait(settle)
 
-    def hook_effort(self, seconds=0.5):
-        efforts = []
+    def hook_effort(self, seconds=0.5, attempts=3):
+        """Mean |hitch pitch effort| over `seconds`, or None if nothing was measured.
 
-        def on_joints(msg):
-            if 'hitch_pitch_joint' in msg.name and msg.effort:
-                efforts.append(msg.effort[msg.name.index('hitch_pitch_joint')])
-        sub = self.create_subscription(JointState, '/joint_states', on_joints, 20)
-        self.wait(seconds)
-        self.destroy_subscription(sub)
-        return abs(sum(efforts) / len(efforts)) if efforts else 0.0
+        A reading that never arrived is not a reading of zero. This used to return 0.0
+        when no joint state turned up in the window, which tells the release that the
+        hook is free while it may still be carrying the whole tongue load: the robot
+        then drives away from a cart that is still on the hitch and reports success.
+        That is what left the latch closed in 2 of 30 E2 trials with the four-caster
+        cart and once during a mission recording, both times under heavy simulator load
+        where messages are late rather than absent.
+        """
+        for attempt in range(attempts):
+            efforts = []
+
+            def on_joints(msg):
+                if 'hitch_pitch_joint' in msg.name and msg.effort:
+                    efforts.append(msg.effort[msg.name.index('hitch_pitch_joint')])
+            sub = self.create_subscription(JointState, '/joint_states', on_joints, 20)
+            self.wait(seconds)
+            self.destroy_subscription(sub)
+            if efforts:
+                return abs(sum(efforts) / len(efforts))
+            self.get_logger().warn(f'No joint states while reading the hook effort '
+                                   f'(attempt {attempt + 1}).')
+        return None
 
     def planar_tf(self, target, source, stamp=None):
         tf = self.tf_buffer.lookup_transform(target, source, stamp or Time(),
@@ -275,7 +290,13 @@ def _dock_cart(node):
     node.set_hook(node.get_parameter('hook_up').value)
     loaded = node.hook_effort()
     threshold = node.get_parameter('engage_effort').value
-    node.get_logger().info(f'Hitch pitch effort: {free:.2f} before, {loaded:.2f} after '
+    if loaded is None:
+        node.get_logger().error('Could not read the hitch effort; treating the cart as '
+                                'not hooked.')
+        node.set_hook(node.get_parameter('hook_down').value)
+        return 1
+    node.get_logger().info(f'Hitch pitch effort: {free if free is None else f"{free:.2f}"} '
+                           f'before, {loaded:.2f} after '
                            f'raising the hook (threshold {threshold:.2f}).')
     if loaded < threshold:
         node.get_logger().error('The tow bar is not in the hook; lowering it again.')
@@ -287,10 +308,24 @@ def _dock_cart(node):
 
 def _release_cart(node):
     node.call_bool('/cart/set_coupled', False)
-    node.set_hook(node.get_parameter('hook_down').value)
-    effort = node.hook_effort()
-    if effort >= node.get_parameter('engage_effort').value:
-        node.get_logger().error(f'The hook is still loaded ({effort:.2f}); not driving away.')
+    threshold = node.get_parameter('engage_effort').value
+    # The hook carries the tongue load until the tow bar has slid off it, so the servo
+    # still reads as loaded for a moment after the hook starts going down. Heavily loaded
+    # releases needed more than one settle: look again a few times before reporting that
+    # the cart is still on the hitch, which is a fault an operator has to clear.
+    for attempt in range(4):
+        node.set_hook(node.get_parameter('hook_down').value)
+        effort = node.hook_effort()
+        if effort is not None and effort < threshold:
+            break
+        reading = 'nothing' if effort is None else f'{effort:.2f}'
+        node.get_logger().info(f'The hook still reads {reading}; waiting for the load '
+                               f'to come off (attempt {attempt + 1}).')
+    else:
+        # Unknown counts as loaded: driving away from a cart that is still on the hitch
+        # is the failure this check exists to prevent.
+        reading = 'nothing' if effort is None else f'{effort:.2f}'
+        node.get_logger().error(f'The hook still reads {reading}; not driving away.')
         return 1
     node.drive_straight(STAGING_DISTANCE)
     node.set_hook(0.0, settle=0.5)

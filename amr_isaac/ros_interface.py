@@ -8,11 +8,12 @@ Real robot (amr_base + amr_hitch)        Simulator (this node)
   srv  /amr_hitch/set_torque (SetBool)     same, torque off = passive hitch
   srv  /amr_hitch/set_yaw_passive          same, only the yaw joint free (towing)
   -                                        pub /clock (use_sim_time:=true)
+  -                                        sub /sim/set_state (experiment reset)
 """
 
 import math
 
-from geometry_msgs.msg import TransformStamped, Twist
+from geometry_msgs.msg import PoseArray, TransformStamped, Twist
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
@@ -39,10 +40,12 @@ class SimRosInterface:
         self.cmd_time = -1e9
         self.hitch_target = {name: 0.0 for name in hitch_joints}
         self.hitch_torque = True
+        self.set_state = None       # pending teleport, applied by the main loop
         self.now = 0.0
         n = self.node
         n.create_subscription(Twist, 'cmd_vel', self._on_cmd, 10)
         n.create_subscription(JointState, 'amr_hitch/command', self._on_hitch, 10)
+        n.create_subscription(PoseArray, 'sim/set_state', self._on_set_state, 1)
         n.create_service(SetBool, 'amr_hitch/set_torque', self._on_torque)
         n.create_service(SetBool, 'amr_hitch/set_yaw_passive', self._on_yaw_passive)
         self.yaw_passive = False
@@ -58,6 +61,19 @@ class SimRosInterface:
         self.executor.add_node(n)
 
     # ---- inputs -------------------------------------------------------------
+    def _on_set_state(self, msg):
+        """Teleport for repeated experiments: poses[0] robot, poses[1] cart (optional).
+
+        Not on the real robot. The main loop applies it between physics steps.
+        """
+        def planar(p):
+            return (p.position.x, p.position.y,
+                    2.0 * math.atan2(p.orientation.z, p.orientation.w))
+
+        if msg.poses:
+            self.set_state = (planar(msg.poses[0]),
+                              planar(msg.poses[1]) if len(msg.poses) > 1 else None)
+
     def _on_cmd(self, msg):
         c = self.cfg
         v = max(-c['max_linear'], min(c['max_linear'], msg.linear.x))

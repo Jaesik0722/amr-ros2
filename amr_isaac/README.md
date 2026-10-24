@@ -51,7 +51,7 @@ ros2 topic pub --once /amr_hitch/command sensor_msgs/msg/JointState \
 `--no-realtime`, `--reimport` (force URDF reconversion),
 `--selftest` (scripted drive/hitch checks, exits 0 on pass).
 
-Real-site twin (see [docs/gaussian_splatting.md](../docs/gaussian_splatting.md)):
+Real-site twin:
 `--env-usd A.usdz [B.usd ...]` references visual environments (e.g. a 3DGRUT NuRec
 USDZ) instead of `--env`; `--env-collision mesh.usda` adds static triangle-mesh colliders
 that the RTX lidar sees but cameras do not (`primvars:hideForCamera`; an invisible prim

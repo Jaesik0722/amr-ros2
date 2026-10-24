@@ -4,6 +4,10 @@ ROS 2 Jazzy packages for a differential-drive AMR with a 2-DOF (yaw/pitch)
 actuated towing hitch, a Livox Mid-360 lidar and an MD Robot motor driver.
 All robot-specific code is Python (`ament_python`).
 
+**Video:** [Active-hitch cart towing, in simulation](https://youtu.be/rXMSiHAxxpk) — the
+full mission (couple, tow through a 1.00 m passage, deliver, charge, return) followed by
+the comparison of four mechanical conditions of the hitch. Everything in it is simulated.
+
 | Package | Contents |
 |---|---|
 | `amr_base` | MD Robot RS485 driver: `cmd_vel` → wheels, encoders → `odom`, `/tf`, `joint_states`, motor currents |
@@ -11,15 +15,16 @@ All robot-specific code is Python (`ament_python`).
 | `amr_description` | URDF/xacro generated from the CAD (`Product1_V0.2.stp`), see below |
 | `amr_bringup` | Launch files, Nav2 parameters (MPPI), Livox and scan-slice configuration |
 | `amr_docking` | ArUco docking: charger (Nav2 docking_server, forward) and carts (reverse docking + hitch-current check), towing mode (cart footprint, cart cloud filter, towing speed limits) |
-| `amr_capture` | Gaussian Splatting capture rig (ZED 2 + Mid-360 + T265 on a cart): recording launch, operator crop filter, FAST-LIO config, bag → COLMAP/nerfstudio export, lidar map → collision mesh. See [docs/gaussian_splatting.md](docs/gaussian_splatting.md) |
+| `amr_capture` | Gaussian Splatting capture rig (D435i + Mid-360 on one plate): recording launch, operator crop filter, FAST-LIO config, bag → COLMAP/nerfstudio export, lidar map → collision mesh |
 | `amr_isaac` | Isaac Sim 5.1 simulation with the same ROS 2 interface (not a colcon package), see [amr_isaac/README.md](amr_isaac/README.md) |
+| `amr_lab` | Isaac Lab tasks for the hitch: PPO training, paired evaluation and the recording tools (not a colcon package), see [amr_lab/README.md](amr_lab/README.md) |
+| `amr_experiments` | The measured ROS experiments E1–E7 and the tools that run, analyse and record them, see [amr_experiments/README.md](amr_experiments/README.md) |
 
 ## Documentation
 
-- [docs/setup_new_pc.md](docs/setup_new_pc.md): setting up a new PC (ROS 2, Isaac Sim, real robot, capture rig), in Korean
-- [docs/gaussian_splatting.md](docs/gaussian_splatting.md): real site → Gaussian Splatting → Isaac Sim twin
-- [docs/research_plan.md](docs/research_plan.md): planned papers
-- [amr_isaac/README.md](amr_isaac/README.md): simulation
+- [amr_isaac/README.md](amr_isaac/README.md): the Isaac Sim simulation
+- [amr_lab/README.md](amr_lab/README.md): learning the active hitch, and how the runs are driven
+- [amr_experiments/README.md](amr_experiments/README.md): the experiments behind the numbers
 
 ## Setup (Ubuntu 24.04, ROS 2 Jazzy)
 

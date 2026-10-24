@@ -36,6 +36,9 @@ PITCH_IN_YAW = np.array([-0.0422, 0.0, 0.0])
 TIP_IN_PITCH = np.array([-0.0496, 0.0, 0.0200])
 RX_IN_BASE = np.array([0.194, 0.0, 0.117])     # charging_rx_link
 TX_IN_CHARGER = np.array([0.0, 0.0, 0.117])     # TC-200 antenna face, charger target frame
+CART_WHEEL_MASS = 0.5                           # one cart wheel [kg]
+CART_SWIVEL_MASS = 0.3                          # one caster swivel yoke [kg]
+CART_CASTER_TRAIL = 0.035                       # wheel centre behind the swivel axis [m]
 LATCH_TOLERANCE = 0.03   # m, horizontal hook-to-bar offset that still catches
 ENGAGE_PITCH = 0.1     # rad, hitch pitch target that catches the bar
 RELEASE_PITCH = 0.0
@@ -134,7 +137,8 @@ class DockingWorld:
     """Build the cart and charger; simulate the indoor GPS, battery and latch."""
 
     def __init__(self, stage, targets_file, markers_dir, cart_pose, charger_pose,
-                 friction_materials, bind_material):
+                 friction_materials, bind_material, cart_mass=22.0,
+                 cart_wheels='trailer'):
         with open(targets_file) as f:
             self.cfg = yaml.safe_load(f)
         self.stage = stage
@@ -151,7 +155,7 @@ class DockingWorld:
         self.battery = 0.8
         self.charging = False
         if cart_pose is not None:
-            self._build_cart()
+            self._build_cart(cart_mass, cart_wheels)
         if charger_pose is not None:
             self._build_charger()
 
@@ -163,12 +167,35 @@ class DockingWorld:
             marker_quad(self.stage, f'{parent}/aruco_{marker_id}', png, self.marker_size,
                         (x, float(y), t['marker_height']))
 
-    def _build_cart(self, mass=22.0):
+    def _build_cart(self, mass=22.0, wheels='trailer'):
         """Folding platform cart (green plastic deck, white handle) loaded with boxes.
 
         Cart frame: centre on the floor, x towards the robot side (marker plate and tow
         bar), handle at the far end. Deck 0.84 x 0.56 m, top 0.26 m; 125 mm wheels.
         The boxes are part of the cart body (mass includes ~8 kg of load).
+
+        `wheels` picks what the four wheels are, because factory carts come both ways
+        and the two behave like different vehicles:
+
+        - 'trailer': swivel casters at the front, wheels on fixed axles at the back.
+          The rear axle resists sideways motion, so the cart has a heading the hitch
+          angle is measured against - a single-axle trailer.
+        - 'caster4': four swivelling casters. Nothing holds a heading, so the cart is
+          pushed rather than towed and the hitch angle no longer says where it is going.
+
+        The two are modelled at different levels, because an ideal caster means
+        different things in them. In 'trailer' the rear axle carries the constraint and
+        the front pair only has to hold the deck up, which is the textbook single-axle
+        trailer, so a frictionless sphere is enough. In 'caster4' the casters are the
+        entire ground contact, and frictionless spheres would leave a puck that slides
+        sideways for free - so each caster is built as the mechanism it is: a swivel
+        about the vertical mount axis carrying a wheel on a horizontal axle, offset
+        behind that axis by the trail. The trail is what makes a caster line itself up
+        with the motion and resist being dragged sideways until it has.
+
+        Cross-configuration numbers are therefore indicative rather than a controlled
+        comparison: the front support is idealised in one and a mechanism in the other.
+        Both carts are given the same total mass so that at least is not a confound.
         """
         s = self.stage
         root = s.DefinePrim(CART, 'Xform')
@@ -176,8 +203,13 @@ class DockingWorld:
         UsdPhysics.ArticulationRootAPI.Apply(root)
         body = s.DefinePrim(f'{CART}/body', 'Xform')
         UsdPhysics.RigidBodyAPI.Apply(body)
+        # The trailer's two rear wheels are bodies of their own, so that cart has
+        # always weighed mass + 1.0 kg in total. The four casters weigh more than that,
+        # so take their mass off the deck and both carts come out the same.
+        parts = 2 * CART_WHEEL_MASS if wheels == 'trailer' else \
+            4 * (CART_SWIVEL_MASS + CART_WHEEL_MASS)
         m = UsdPhysics.MassAPI.Apply(body)
-        m.CreateMassAttr(mass)
+        m.CreateMassAttr(mass + 2 * CART_WHEEL_MASS - parts)
         m.CreateCenterOfMassAttr(Gf.Vec3f(-0.03, 0.0, 0.30))
         # Rolling resistance: the casters are ideal (frictionless) and the axles free, so
         # without damping a nudged cart rolls on forever. ~7 N at 0.3 m/s.
@@ -239,38 +271,92 @@ class DockingWorld:
         # (ideal swivel casters), wheels on revolute axles at the back.
         wx, wy = hl - 0.08, hw - 0.06
         for name, x, y in (('fl', wx, wy), ('fr', wx, -wy), ('bl', -wx, wy), ('br', -wx, -wy)):
+            # The mounting plate is bolted to the deck in both carts; the swivel and the
+            # fork only belong here when the caster is idealised, because the mechanism
+            # version carries its own and has to turn with it.
             box(s, f'{b}/caster_plate_{name}', (0.10, 0.08, 0.006),
                 (x, y, top - thick - 0.003), metal, collide=False)
+            if wheels == 'caster4':
+                continue
             box(s, f'{b}/caster_swivel_{name}', (0.05, 0.05, 0.02),
                 (x, y, top - thick - 0.016), metal, collide=False)
             for k, dy in (('a', 0.022), ('b', -0.022)):
                 box(s, f'{b}/caster_fork_{name}{k}', (0.03, 0.005, top - thick - r - 0.026),
                     (x, y + dy, (top - thick - 0.026 + r) / 2), metal, collide=False)
-        for side, y in (('l', wy), ('r', -wy)):
-            sph = UsdGeom.Sphere.Define(s, f'{b}/caster_{side}')
+        if wheels not in ('trailer', 'caster4'):
+            raise ValueError(f'unknown cart wheels {wheels!r}: trailer or caster4')
+
+        def ideal_caster(name, x, y):
+            """Build an idealised caster: a frictionless sphere rigid with the body."""
+            sph = UsdGeom.Sphere.Define(s, f'{b}/caster_{name}')
             sph.CreateRadiusAttr(r)
             sph.CreatePurposeAttr('guide')
-            UsdGeom.Xformable(sph).AddTranslateOp().Set(Gf.Vec3d(wx, y, r))
+            UsdGeom.Xformable(sph).AddTranslateOp().Set(Gf.Vec3d(x, y, r))
             UsdPhysics.CollisionAPI.Apply(sph.GetPrim())
             self.bind_material(sph.GetPrim(), self.caster_mat)
-            tube_y(s, f'{b}/caster_wheel_{side}', r, 0.032, (wx, y, r), tyre)
-        for side, y in (('l', wy), ('r', -wy)):
-            w = s.DefinePrim(f'{CART}/wheel_{side}', 'Xform')
-            place(w, (-wx, y, r))
-            UsdPhysics.RigidBodyAPI.Apply(w)
-            UsdPhysics.MassAPI.Apply(w).CreateMassAttr(0.5)
-            sph = UsdGeom.Sphere.Define(s, f'{CART}/wheel_{side}/collider')
+            tube_y(s, f'{b}/caster_wheel_{name}', r, 0.032, (x, y, r), tyre)
+
+        def swivel_caster(name, x, y):
+            """Build a caster as its mechanism: swivel about Z, wheel on Y, offset by trail."""
+            swivel = s.DefinePrim(f'{CART}/swivel_{name}', 'Xform')
+            place(swivel, (x, y, r))
+            UsdPhysics.RigidBodyAPI.Apply(swivel)
+            UsdPhysics.MassAPI.Apply(swivel).CreateMassAttr(CART_SWIVEL_MASS)
+            for k, dy in (('a', 0.022), ('b', -0.022)):
+                box(s, f'{CART}/swivel_{name}/fork{k}', (0.03, 0.005, 0.07),
+                    (-CART_CASTER_TRAIL / 2, dy, 0.045), metal, collide=False)
+            box(s, f'{CART}/swivel_{name}/yoke', (0.05, 0.05, 0.02), (0.0, 0.0, 0.085),
+                metal, collide=False)
+            j = UsdPhysics.RevoluteJoint.Define(s, f'{CART}/swivel_joint_{name}')
+            j.CreateBody0Rel().SetTargets([b])
+            j.CreateBody1Rel().SetTargets([f'{CART}/swivel_{name}'])
+            j.CreateAxisAttr('Z')
+            j.CreateLocalPos0Attr(Gf.Vec3f(x, y, r))
+            j.CreateLocalPos1Attr(Gf.Vec3f(0, 0, 0))
+
+            wheel = s.DefinePrim(f'{CART}/wheel_{name}', 'Xform')
+            place(wheel, (x - CART_CASTER_TRAIL, y, r))
+            UsdPhysics.RigidBodyAPI.Apply(wheel)
+            UsdPhysics.MassAPI.Apply(wheel).CreateMassAttr(CART_WHEEL_MASS)
+            sph = UsdGeom.Sphere.Define(s, f'{CART}/wheel_{name}/collider')
             sph.CreateRadiusAttr(r)
             sph.CreatePurposeAttr('guide')
             UsdPhysics.CollisionAPI.Apply(sph.GetPrim())
             self.bind_material(sph.GetPrim(), self.tyre_mat)
-            tube_y(s, f'{CART}/wheel_{side}/tyre', r, 0.032, (0.0, 0.0, 0.0), tyre)
-            j = UsdPhysics.RevoluteJoint.Define(s, f'{CART}/axle_{side}')
+            tube_y(s, f'{CART}/wheel_{name}/tyre', r, 0.032, (0.0, 0.0, 0.0), tyre)
+            a = UsdPhysics.RevoluteJoint.Define(s, f'{CART}/axle_{name}')
+            a.CreateBody0Rel().SetTargets([f'{CART}/swivel_{name}'])
+            a.CreateBody1Rel().SetTargets([f'{CART}/wheel_{name}'])
+            a.CreateAxisAttr('Y')
+            a.CreateLocalPos0Attr(Gf.Vec3f(-CART_CASTER_TRAIL, 0, 0))
+            a.CreateLocalPos1Attr(Gf.Vec3f(0, 0, 0))
+
+        def fixed_wheel(name, x, y):
+            """Build a wheel on a free axle: rolls forwards, resists sideways motion."""
+            w = s.DefinePrim(f'{CART}/wheel_{name}', 'Xform')
+            place(w, (x, y, r))
+            UsdPhysics.RigidBodyAPI.Apply(w)
+            UsdPhysics.MassAPI.Apply(w).CreateMassAttr(CART_WHEEL_MASS)
+            sph = UsdGeom.Sphere.Define(s, f'{CART}/wheel_{name}/collider')
+            sph.CreateRadiusAttr(r)
+            sph.CreatePurposeAttr('guide')
+            UsdPhysics.CollisionAPI.Apply(sph.GetPrim())
+            self.bind_material(sph.GetPrim(), self.tyre_mat)
+            tube_y(s, f'{CART}/wheel_{name}/tyre', r, 0.032, (0.0, 0.0, 0.0), tyre)
+            j = UsdPhysics.RevoluteJoint.Define(s, f'{CART}/axle_{name}')
             j.CreateBody0Rel().SetTargets([b])
-            j.CreateBody1Rel().SetTargets([f'{CART}/wheel_{side}'])
+            j.CreateBody1Rel().SetTargets([f'{CART}/wheel_{name}'])
             j.CreateAxisAttr('Y')
-            j.CreateLocalPos0Attr(Gf.Vec3f(-wx, y, r))
+            j.CreateLocalPos0Attr(Gf.Vec3f(x, y, r))
             j.CreateLocalPos1Attr(Gf.Vec3f(0, 0, 0))
+
+        for side, y in (('l', wy), ('r', -wy)):
+            if wheels == 'caster4':
+                swivel_caster(f'f{side}', wx, y)
+                swivel_caster(f'b{side}', -wx, y)
+            else:
+                ideal_caster(side, wx, y)              # front: holds the deck up only
+                fixed_wheel(side, -wx, y)              # back: the rolling constraint
         # Hook-bar coupling between the robot's and the cart's articulations. Joints
         # added while simulating are not picked up, so it exists from the start and is
         # only enabled (with its frames set to the current poses) when the hook catches.

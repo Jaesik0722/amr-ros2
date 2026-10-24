@@ -8,7 +8,8 @@ current confirmed the coupling. While coupled:
     the scan slice and costmaps use), so it is not seen as an obstacle;
   - the MPPI limits switch to towing values (slower, no reversing);
   - the hitch yaw becomes passive, so the cart trails like a trailer (optional).
-The cloud filter always runs; it passes the cloud through while uncoupled.
+The cloud filter and the footprint publisher always run: the cloud passes through
+and the footprint is the robot's own outline while uncoupled.
 """
 
 import math
@@ -122,7 +123,7 @@ class CartTowing(Node):
         self._set_limits(self.coupled)
         if self.get_parameter('passive_yaw').value and self.yaw_client.service_is_ready():
             self.yaw_client.call_async(SetBool.Request(data=self.coupled))
-        self._publish_footprint(force=True)
+        self._publish_footprint()
         res.success = True
         res.message = 'towing mode' if self.coupled else 'normal mode'
         self.get_logger().info(res.message)
@@ -152,9 +153,14 @@ class CartTowing(Node):
     def _cart_pose(self):
         return cart_pose_in_base(self.hitch_yaw, self.bar_x)
 
-    def _publish_footprint(self, force=False):
-        if not self.coupled and not force:
-            return
+    def _publish_footprint(self):
+        """Publish the footprint whether or not a cart is on the hitch.
+
+        Publishing only while coupled means the switch back to the robot footprint is a
+        single message. If Nav2 misses it, the costmaps keep the cart hull: the docking
+        server then finds the robot in collision at the charger and it can never undock
+        again. Republishing the plain robot footprint costs nothing and cannot wedge.
+        """
         pts = ROBOT_FOOTPRINT
         if self.coupled:
             pts = convex_hull(ROBOT_FOOTPRINT + cart_corners(self._cart_pose(), *self.half))
