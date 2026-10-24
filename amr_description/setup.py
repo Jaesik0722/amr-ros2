@@ -17,6 +17,7 @@ setup(
         ('share/' + package_name + '/meshes', glob('meshes/*.stl') + glob('meshes/*.dae')),
     ],
     install_requires=['setuptools'],
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Jaesik0722',
     maintainer_email='jslvjh@gmail.com',

@@ -231,7 +231,6 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
-        # TODO: filter the towed cart out of this cloud (it moves with the hitch angle).
         livox:
           topic: /livox/lidar_filtered   # cart removed while towing (cart_towing)
           data_type: "PointCloud2"

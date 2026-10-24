@@ -16,6 +16,7 @@ setup(
         ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools'],
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Jaesik0722',
     maintainer_email='jslvjh@gmail.com',

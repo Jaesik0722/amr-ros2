@@ -118,14 +118,25 @@ per-part rules, then rerun `step_to_urdf.py`.
 | `front_camera_link`, `rear_camera_link` | D435, realsense2_description convention |
 | `charging_rx_link` | wireless charging coil face |
 
-## TODO
+## What has not been measured on the robot
 
-- [ ] Measure masses (see above); verify wheel radius / track by calibration
-- [ ] Hitch joint limits
-- [ ] Livox mounting pose, IP addresses in `config/MID360_config.json`
-- [ ] Hitch servo IDs and zero offsets
-- [ ] Mid-360 point cloud origin offset above the mounting face (`livox_joint`)
-- [ ] The rear Bluetooth antennas are inside the Mid-360 field of view (rear, about +-160 deg)
-- [ ] Filter the towed cart out of the lidar cloud; cart-aware footprint
-- [ ] Real robot: calibrate `engage_effort` (hitch current with/without a cart), indoor GPS frame vs. map
+Everything here runs in the Isaac Sim simulation. The hardware drivers are written and
+unit-tested, but the full stack has not been run on the robot, so the following are
+assumptions carried in the configuration rather than measurements, and each will move
+once the robot is on the bench:
+
+- Masses are from the CAD with some assumed values; wheel radius and track want a
+  calibration drive.
+- Hitch joint limits are the previous URDF's; the servo ids and zero offsets in
+  `amr_hitch/config/hitch.yaml` have never been read off the bus.
+- The Mid-360 addresses in `amr_bringup/config/MID360_config.json` are placeholders, and
+  the office LAN shares the sensor's default subnet; put the lidar on its own.
+- `livox_joint` is the mounting face, not the point cloud origin.
+- `engage_effort` is in N.m in simulation and in amps on the robot, so the hook-engaged
+  threshold has to be set from a measurement.
+- The indoor GPS frame is not yet registered against the map.
+
+One known geometric limitation is in the build rather than the configuration: the two
+rear Bluetooth antennas sit inside the Mid-360's field of view, about +-160 degrees
+behind the robot.
 - [ ] WiBotic STEP models (not public; ask WiBotic) to replace the datasheet-size boxes
